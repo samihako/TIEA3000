@@ -1,0 +1,101 @@
+#include <EEPROM.h>
+ 
+#define NAYTE_AIKA 5000  //aika joka millisekuneissa odotellaan näytteenttamista
+ 
+int tempPin = 0;      		//lämpötila sensorin pinni
+int tulostusPin = 3;    	//tulostusnapin pinni
+int tyhjennysPin = 2;   	//tyhjennysnapin pinni
+int sekunti = 0;			//muuttuja johon tallentaan sekkari
+ 
+int osoite = 0;      		//EEPROM osoite
+int vanha_arvo;				//muuttuja johon tallennetaan vertailua varten vanha sensorin arvo
+
+unsigned long ajastin;		//ajastin pitämään huolta siitä, että lämpötilanäytteitä otetaan oikeilla väleillä
+ 
+float adc_asteiksi = 0.0;   //lämpötilasensorin muuttamiseksi volteiksi
+ 
+void tulostus();
+void tyhjennys();
+void kirjoitus();
+ 
+void setup(){
+  Serial.begin(9600);     			//avataan sarjaportti
+  adc_asteiksi = 5.0/1024.0;  		//adc arvon muunnoskaava
+  ajastin = millis();         		//millis() palauttaa ajan ohjelman aloittamisesta millisekunteina
+  attachInterrupt(digitalPinToInterrupt(tulostusPin), tulostus, RISING); //keskeytys joka käynnistyy, kun tulostusPinnin jännite nousee
+  attachInterrupt(digitalPinToInterrupt(tyhjennysPin), tyhjennys, RISING); //keskeytys joka käynnistyy, kun tyhjennysPinnin jännite nousee
+}
+ 
+void loop(){
+  if(millis()-ajastin > NAYTE_AIKA)  //tarkastetaan onko 5000ms kulunut edellisestä
+  {
+    sekunti = sekunti + 5;
+    kirjoitus();
+    ajastin = millis();
+  }
+ 
+
+  delay(1);
+}
+
+ 
+void kirjoitus()
+{
+  if(vanha_arvo != analogRead(tempPin))
+  {
+  byte aikaleima = sekunti;
+  EEPROM.write(osoite, aikaleima);         	//kirjoitetaan aikaleima osoite arvolla olevaan muistipaikkaan
+  osoite++;                      			//siirretään osoite yhdellä eteenpäin
+  if(osoite == EEPROM.length())  			//tarkastetaan ollaanko EEPROMin lopussa
+  {
+    osoite = 0;              				//jos ollaan niin aloitetaan alusta
+  }
+  int arvonmuunnos = analogRead(tempPin)/4; //jaetaan lämpötilasensorin arvo 4:llä niin se mahtuu -255-255 välille
+  byte value = arvonmuunnos;     			
+  EEPROM.write(osoite, arvonmuunnos);       //kirjoitetaan arvomuunnos osoite arvolla olevaan muistipaikkaan
+  osoite++;                      			//siirretään osoite yhdellä eteenpäin
+  if(osoite == EEPROM.length())  			//tarkastetaan ollaanko EEPROMin lopussa
+  {
+    osoite = 0;              				//jos ollaan niin aloitetaan alusta
+  }
+  vanha_arvo = analogRead(tempPin);			//talletetaan vanha_arvo muuttujaan lämpötilasensorin arvo
+  }
+
+}
+
+void tulostus()
+{
+  for (int i = 0 ; i < EEPROM.length() ; i++) {
+    byte aika = EEPROM.read(i);						//luetaan EEPROM osoitteesta i muutjunaan aika
+    byte arvo = EEPROM.read(i + 1);                	//luetaan EEPROM osoitteesta i + 1 muuttujaan arvo
+    float lampo = arvo * adc_asteiksi * 4;          //muutetaan ADC asteiksi, kerrotaan neljällä niin saadaan alkuperäinen arvo
+    lampo = (lampo - 0.5)*100;                  	//säädetään vielä offset kuntoon
+
+    if(arvo != 0)                              		//hypätään yli tyhjät muistipaikat, muutoin ohjelma käy ne kaikki läpi
+    {
+      Serial.print("Aika: ");						//kirjoitetaan sarjaporttiin Aika, ADC, LT sekä niiden arvot
+	  Serial.print(aika);
+      Serial.print(" \t");
+      Serial.print("ADC: ");
+      Serial.print(arvo);
+      Serial.print(" \t");
+      Serial.print("LT: ");
+      Serial.println(lampo);
+    }
+    
+  }
+delay(500);
+}
+ 
+void tyhjennys()
+{
+  for (int i = 0 ; i < EEPROM.length() ; i++) {
+    if(EEPROM.read(i) != 0)                     //hypätään yli tyhjät muistipaikat
+    {
+      EEPROM.write(i, 0);                       //kirjoitetaan 0 osoiteeseen i
+    }
+  }
+  Serial.println("EEPROM tyhjennetty");
+  osoite = 0;                                  //asetetaan osoite muuttuja takaisin 0
+}
+
